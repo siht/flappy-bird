@@ -1,10 +1,10 @@
 from __future__ import print_function
 from patterns import FlyWeight, typewrapper
 from utils import load_img, Surfaces
-import pygame
 from preferences import *
-import time
 import pytweener
+import pygame
+import math
 
 @typewrapper(pygame.surface.Surface, '_surf')
 class SurfaceImage(object):
@@ -21,7 +21,6 @@ class Bird(pygame.sprite.Sprite):
     UP = 'UP'
     DOWN0 = 'DOWN0'
     DOWN1 = 'DOWN1'
-    FACES = RIGHT, UP, DOWN0, DOWN1
     
     def __init__(self, position=(0,0)):
         pygame.sprite.Sprite.__init__(self)
@@ -82,14 +81,16 @@ class Bird(pygame.sprite.Sprite):
         self.__inc = True
         self.__want_flap = 0
         self.__flap_delay = 2
-        self.__facing = Bird.FACES[0]
+        self.__facing = Bird.RIGHT
         self.__wants_fly = False
         self._my_tweener = pytweener.Tweener()
         self.__aps = 0
         self.__im_flying = True
+        self.alive = True
 
         self.image = self.images[self.__facing][self.__index_image]
         self.rect = self.image.get_rect()
+        self.radius = 38
         self._x, self._y = position
         self.rect.topleft = position
         
@@ -102,70 +103,66 @@ class Bird(pygame.sprite.Sprite):
         self.__aps = value
 
     def move_wings(self):
-        if self.__index_image == 2:
-            self.__inc = False
-        if self.__index_image == 0:
-            self.__inc = True
-        if self.__inc:
-            self.__index_image += 1
+        if self.alive:
+            if self.__index_image == 2:
+                self.__inc = False
+            if self.__index_image == 0:
+                self.__inc = True
+            if self.__inc:
+                self.__index_image += 1
+            else:
+                self.__index_image -= 1
+            self.image = self.images[self.__facing][self.__index_image]
         else:
-            self.__index_image -= 1
-        self.image = self.images[self.__facing][self.__index_image]
+            self.image = self.images[self.__facing][1]
 
     def fly(self):
-        if self._my_tweener.hasTweens():
-            self._my_tweener = pytweener.Tweener()
-        up = SIZE_FLY
-        easing_object = self
-        y = self.rect.y + up
-        tw_time = TIME_FLY
-        # tw_type = pytweener.Easing.Linear.easeNone
-        # tw_type = pytweener.Easing.Bounce.easeOut
-        tw_type = pytweener.Easing.Elastic.easeOut
-        # tw_type = pytweener.Easing.Expo.easeOut
-        self._my_tweener.addTween(easing_object,
-                                  _y=y,
-                                  tweenTime=tw_time,
-                                  tweenType=tw_type,
-                                  onCompleteFunction=easing_object.fall)
-        self.__facing = Bird.UP
-        self.__im_flying = True
+        if self.alive:
+            self.__im_flying = True
+            if self._my_tweener.hasTweens():
+                self._my_tweener = pytweener.Tweener()
+            up = SIZE_FLY
+            easing_object = self
+            y = self.rect.y + up
+            if y < 0:
+                y = 0
+            tw_time = TIME_FLY
+            tw_type = pytweener.Easing.Strong.easeOut
+            self._my_tweener.addTween(easing_object,
+                                      _y=y,
+                                      tweenTime=tw_time,
+                                      tweenType=tw_type,
+                                      onCompleteFunction=easing_object.fall)
+            self.__facing = Bird.UP
 
     def fall(self):
-        self._my_tweener = pytweener.Tweener()
         self.__im_flying = False
         self.__facing = Bird.DOWN0
-        down = FLOOR_LEVEL
+        down = FLOOR_LEVEL - BIRD_SIZE[1] - 8
         easing_object = self
-        y = down - self.rect.y
-        tw_time = TIME_FLY
+        y = down
+        dist = down - self._y
+        proportion = math.sqrt(dist/100)
+        tw_time = TIME_FLY*proportion
         tw_type = pytweener.Easing.Linear.easeIn
-        print(down, y, tw_time, tw_type)
+        # print('falling', '\ndown',down, '\ny', y, '\ntw_time', tw_time, '\ntw_type', tw_type, '\nproportion', proportion)
         self._my_tweener.addTween(easing_object,
                                   _y=y,
                                   tweenTime=tw_time,
                                   tweenType=tw_type)
 
-    def keep_falling(self):
+    def keep_tweening(self):
         delta = self.aps/1000.0
         self._my_tweener.update(delta)
         self.rect.y = self._y
 
-    def keep_flying(self):
-        delta = self.aps/1000.0
-        self._my_tweener.update(delta)
-        self.rect.y = self._y
-        
     def update(self):
         self.__want_flap += 1
         if self.__want_flap == self.__flap_delay:
             self.__want_flap = 0
             self.move_wings()
-        if self._my_tweener.hasTweens() and self.__im_flying:
-            self.keep_flying()
-        elif self._my_tweener.hasTweens() and not self.__im_flying:
-            self.keep_falling()
-        print(self.rect, self._y)
+        if self._my_tweener.hasTweens():
+            self.keep_tweening()
 
 class BackGround(pygame.sprite.Sprite):
     '''BackGround is always static'''
@@ -188,16 +185,22 @@ class Logo(pygame.sprite.Sprite):
 
 class Pipe(pygame.sprite.Sprite):
     '''static tube, only for presentation'''
-    def __init__(self, position=(0,0)):
+    def __init__(self, position=(WINDOW_SIZE[0]+TUBE_SIZE[0], 400)):
         pygame.sprite.Sprite.__init__(self)
         self.image = SurfaceImage('pipe.png').wrap
         self.image = Surfaces.scale(self.image, TUBE_SIZE)
         self.rect = self.image.get_rect()
         self.rect.topleft = position
 
+    def update(self):
+        self.rect.x -= TUBE_TIME
+        if self.rect.x < -40:
+            self.remove(self.groups())
+            del(self)
+
 class PipeInverted(Pipe):
     '''inverted tube, only for presentation'''
-    def __init__(self, position=(0,0)):
+    def __init__(self, position=(WINDOW_SIZE[0]+TUBE_SIZE[0], -20)):
         Pipe.__init__(self, position)
         self.image = Surfaces.flip(self.image, False, True)
 
